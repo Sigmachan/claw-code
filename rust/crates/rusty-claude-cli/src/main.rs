@@ -7683,29 +7683,14 @@ impl LiveCli {
             |_| self.session.path.display().to_string(),
             |path| path.display().to_string(),
         );
-        format!(
-            "\x1b[38;5;196m\
- ██████╗██╗      █████╗ ██╗    ██╗\n\
-██╔════╝██║     ██╔══██╗██║    ██║\n\
-██║     ██║     ███████║██║ █╗ ██║\n\
-██║     ██║     ██╔══██║██║███╗██║\n\
-╚██████╗███████╗██║  ██║╚███╔███╔╝\n\
- ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝\x1b[0m \x1b[38;5;208mCode\x1b[0m 🦞\n\n\
-  \x1b[2mModel\x1b[0m            {}\n\
-  \x1b[2mPermissions\x1b[0m      {}\n\
-  \x1b[2mBranch\x1b[0m           {}\n\
-  \x1b[2mWorkspace\x1b[0m        {}\n\
-  \x1b[2mDirectory\x1b[0m        {}\n\
-  \x1b[2mSession\x1b[0m          {}\n\
-  \x1b[2mAuto-save\x1b[0m        {}\n\n\
-  Type \x1b[1m/help\x1b[0m for commands · \x1b[1m/status\x1b[0m for live context · \x1b[2m/resume latest\x1b[0m jumps back to the newest session · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · \x1b[2mTab\x1b[0m for workflow completions · \x1b[2mShift+Enter\x1b[0m for newline",
-            self.model,
+        render_welcome_box(
+            &self.model,
             self.permission_mode.as_str(),
             git_branch,
-            workspace,
-            cwd,
-            self.session.id,
-            session_path,
+            &workspace,
+            &cwd,
+            &self.session.id,
+            &session_path,
         )
     }
 
@@ -13300,6 +13285,60 @@ fn slash_command_completion_candidates_with_sessions(
     completions.into_iter().collect()
 }
 
+fn banner_pad_cell(s: &str, width: usize) -> String {
+    let n = s.chars().count();
+    if n > width {
+        let mut t: String = s.chars().take(width.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    } else {
+        let mut t = s.to_string();
+        t.push_str(&" ".repeat(width - n));
+        t
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_welcome_box(
+    model: &str,
+    permissions: &str,
+    branch: &str,
+    workspace: &str,
+    cwd: &str,
+    session_id: &str,
+    session_path: &str,
+) -> String {
+    const INNER: usize = 70;
+    let accent = "\x1b[38;2;0;255;65m";
+    let dim = "\x1b[2m";
+    let rst = "\x1b[0m";
+    let bar = "─".repeat(INNER + 2);
+    let row = |cell: String, style: &str| -> String {
+        format!(
+            "{accent}│{rst} {style}{}{rst} {accent}│{rst}\n",
+            banner_pad_cell(&cell, INNER)
+        )
+    };
+    let mut out = String::new();
+    out.push_str(&format!("{accent}╭{bar}╮{rst}\n"));
+    out.push_str(&row("✻ Welcome to claw-code".to_string(), "\x1b[1m"));
+    out.push_str(&row(String::new(), dim));
+    out.push_str(&row(format!("model       {model}"), dim));
+    out.push_str(&row(format!("permissions {permissions}"), dim));
+    out.push_str(&row(format!("branch      {branch}"), dim));
+    out.push_str(&row(format!("workspace   {workspace}"), dim));
+    out.push_str(&row(format!("cwd         {cwd}"), dim));
+    out.push_str(&row(format!("session     {session_id}"), dim));
+    out.push_str(&row(format!("file        {session_path}"), dim));
+    out.push_str(&row(String::new(), dim));
+    out.push_str(&row(
+        "/help · /tools · Tab → workflow completions · Shift+Enter newline".to_string(),
+        dim,
+    ));
+    out.push_str(&format!("{accent}╰{bar}╯{rst}"));
+    out
+}
+
 fn format_tool_call_start(name: &str, input: &str) -> String {
     let parsed: serde_json::Value =
         serde_json::from_str(input).unwrap_or(serde_json::Value::String(input.to_string()));
@@ -13347,17 +13386,20 @@ fn format_tool_call_start(name: &str, input: &str) -> String {
         _ => summarize_tool_payload(input),
     };
 
-    let border = "─".repeat(name.len() + 8);
-    format!(
-        "\x1b[38;5;245m╭─ \x1b[1;36m{name}\x1b[0;38;5;245m ─╮\x1b[0m\n\x1b[38;5;245m│\x1b[0m {detail}\n\x1b[38;5;245m╰{border}╯\x1b[0m"
-    )
+    let detail_indented = detail
+        .lines()
+        .enumerate()
+        .map(|(i, line)| if i == 0 { line.to_string() } else { format!("    {line}") })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("\x1b[38;5;208m⏺\x1b[0m \x1b[1m{name}\x1b[0m  {detail_indented}")
 }
 
 fn format_tool_result(name: &str, output: &str, is_error: bool) -> String {
     let icon = if is_error {
-        "\x1b[1;31m✗\x1b[0m"
+        "  \x1b[2m⎿\x1b[0m \x1b[1;31m✗\x1b[0m"
     } else {
-        "\x1b[1;32m✓\x1b[0m"
+        "  \x1b[2m⎿\x1b[0m \x1b[1;32m✓\x1b[0m"
     };
     if is_error {
         let summary = truncate_for_summary(output.trim(), 160);
